@@ -38,7 +38,13 @@ export async function handleCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  // 3. Parse callback data: askuser:{request_id}:{option_index}
+  // 3. Handle provider switch: provider:{name}
+  if (callbackData.startsWith("provider:")) {
+    await handleProviderCallback(ctx, callbackData);
+    return;
+  }
+
+  // 4. Parse callback data: askuser:{request_id}:{option_index}
   if (!callbackData.startsWith("askuser:")) {
     await ctx.answerCallbackQuery();
     return;
@@ -169,10 +175,11 @@ async function handleResumeCallback(
     return;
   }
 
-  // Check if session is already active
-  if (session.isActive) {
-    await ctx.answerCallbackQuery({ text: "Sessione già attiva" });
-    return;
+  // If a different session is already active, stop it first
+  if (session.isRunning) {
+    await session.stop();
+    await Bun.sleep(150);
+    session.clearStopRequested();
   }
 
   // Resume the selected session
@@ -189,7 +196,7 @@ async function handleResumeCallback(
   } catch (error) {
     console.debug("Failed to edit resume message:", error);
   }
-  await ctx.answerCallbackQuery({ text: "Sessione ripresa!" });
+  await ctx.answerCallbackQuery({ text: "Session resumed!" });
 
   // Send a hidden recap prompt to Claude
   const recapPrompt =
@@ -214,4 +221,57 @@ async function handleResumeCallback(
   } finally {
     typing.stop();
   }
+}
+
+/**
+ * Handle provider switch callback (provider:{name}).
+ */
+async function handleProviderCallback(
+  ctx: Context,
+  callbackData: string
+): Promise<void> {
+  const providerName = callbackData.replace("provider:", "") as "claude" | "codex";
+
+  if (providerName !== "claude" && providerName !== "codex") {
+    await ctx.answerCallbackQuery({ text: "Unknown provider" });
+    return;
+  }
+
+  if (providerName === session.providerName) {
+    await ctx.answerCallbackQuery({ text: `Already using ${providerName}` });
+    return;
+  }
+
+  if (session.isRunning) {
+    await session.stop();
+    await Bun.sleep(200);
+    session.clearStopRequested();
+  }
+
+  session.switchProvider(providerName);
+
+  // Update the button message to reflect new state
+  const claudeTag = providerName === "claude" ? " ✅" : "";
+  const codexTag  = providerName === "codex"  ? " ✅" : "";
+  try {
+    await ctx.editMessageText(
+      `🤖 <b>AI Provider</b>\n\nCurrent: <b>${providerName}</b>\n<i>Session cleared. Next message starts fresh.</i>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: `🟣 Claude${claudeTag}`, callback_data: "provider:claude" },
+              { text: `🟠 Codex${codexTag}`,   callback_data: "provider:codex"  },
+            ],
+          ],
+        },
+      }
+    );
+  } catch {
+    // edit failed (e.g. message too old) — just reply
+    await ctx.reply(`✅ Switched to <b>${providerName}</b>`, { parse_mode: "HTML" });
+  }
+
+  await ctx.answerCallbackQuery({ text: `Switched to ${providerName}` });
 }

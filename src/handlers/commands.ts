@@ -34,10 +34,11 @@ export async function handleStart(ctx: Context): Promise<void> {
       `/status - Show detailed status\n` +
       `/resume - Resume last session\n` +
       `/retry - Retry last message\n` +
+      `/provider - Switch AI provider (claude/codex)\n` +
       `/restart - Restart the bot\n\n` +
       `<b>Tips:</b>\n` +
       `• Prefix with <code>!</code> to interrupt current query\n` +
-      `• Use "think" keyword for extended reasoning\n` +
+      `• Use "think" keyword for extended reasoning (claude only)\n` +
       `• Send photos, voice, or documents`,
     { parse_mode: "HTML" }
   );
@@ -105,6 +106,10 @@ export async function handleStatus(ctx: Context): Promise<void> {
 
   const lines: string[] = ["📊 <b>Bot Status</b>\n"];
 
+  // Provider
+  const providerEmoji = session.providerName === "codex" ? "🟠" : "🟣";
+  lines.push(`${providerEmoji} Provider: <b>${session.providerName}</b>`);
+
   // Session status
   if (session.isActive) {
     lines.push(`✅ Session: Active (${session.sessionId?.slice(0, 8)}...)`);
@@ -136,8 +141,8 @@ export async function handleStatus(ctx: Context): Promise<void> {
     lines.push(`\n⏱️ Last activity: ${ago}s ago`);
   }
 
-  // Usage stats
-  if (session.lastUsage) {
+  // Usage stats (Claude only — Codex CLI doesn't expose token counts)
+  if (session.lastUsage && session.providerName === "claude") {
     const usage = session.lastUsage;
     lines.push(
       `\n📈 Last query usage:`,
@@ -161,6 +166,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
 
   // Working directory
   lines.push(`\n📁 Working dir: <code>${WORKING_DIR}</code>`);
+  lines.push(`\n💡 <i>Switch provider: /provider claude · /provider codex</i>`);
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
 }
@@ -176,51 +182,51 @@ export async function handleResume(ctx: Context): Promise<void> {
     return;
   }
 
-  if (session.isActive) {
-    await ctx.reply("Sessione già attiva. Usa /new per iniziare da capo.");
-    return;
-  }
-
   // Get saved sessions
   const sessions = session.getSessionList();
 
   if (sessions.length === 0) {
-    await ctx.reply("❌ Nessuna sessione salvata.");
+    await ctx.reply("❌ No saved sessions.\n\nStart a conversation first, then use /resume to switch between sessions.");
     return;
   }
 
   // Build inline keyboard with session list
   const buttons = sessions.map((s) => {
-    // Format date: "18/01 10:30"
     const date = new Date(s.saved_at);
-    const dateStr = date.toLocaleDateString("it-IT", {
-      day: "2-digit",
+    const dateStr = date.toLocaleDateString("zh-CN", {
       month: "2-digit",
+      day: "2-digit",
     });
-    const timeStr = date.toLocaleTimeString("it-IT", {
+    const timeStr = date.toLocaleTimeString("zh-CN", {
       hour: "2-digit",
       minute: "2-digit",
     });
 
-    // Truncate title for button (max ~40 chars to fit)
-    const titlePreview =
-      s.title.length > 35 ? s.title.slice(0, 32) + "..." : s.title;
+    const isActive = s.session_id === session.sessionId;
+    const titlePreview = s.title.length > 32 ? s.title.slice(0, 29) + "..." : s.title;
+    const activeTag = isActive ? " ✅" : "";
 
     return [
       {
-        text: `📅 ${dateStr} ${timeStr} - "${titlePreview}"`,
+        text: `📅 ${dateStr} ${timeStr} - "${titlePreview}"${activeTag}`,
         callback_data: `resume:${s.session_id}`,
       },
     ];
   });
 
-  await ctx.reply("📋 <b>Sessioni salvate</b>\n\nSeleziona una sessione da riprendere:", {
-    parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: buttons,
-    },
-  });
+  const currentInfo = session.isActive
+    ? `\nCurrent: <code>${session.sessionId?.slice(0, 8)}...</code> (provider: ${session.providerName})\n`
+    : "\nNo active session.\n";
+
+  await ctx.reply(
+    `📋 <b>Saved Sessions</b>${currentInfo}\nSelect a session to resume:`,
+    {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: buttons },
+    }
+  );
 }
+
 
 /**
  * /restart - Restart the bot process.
@@ -314,23 +320,35 @@ export async function handleProvider(ctx: Context): Promise<void> {
 
   const arg = (ctx.match as string | undefined)?.trim().toLowerCase();
 
+  // No argument → show inline keyboard to pick provider
   if (!arg) {
-    // Show current provider
+    const current = session.providerName;
+    const claudeTag = current === "claude" ? " ✅" : "";
+    const codexTag = current === "codex" ? " ✅" : "";
+
     await ctx.reply(
-      `🤖 Current provider: <b>${session.providerName}</b>\n\n` +
-        `Use <code>/provider claude</code> or <code>/provider codex</code> to switch.\n` +
-        `<i>Switching provider will clear the current session.</i>`,
-      { parse_mode: "HTML" }
+      `🤖 <b>AI Provider</b>\n\nCurrent: <b>${current}</b>\n<i>Switching will clear the current session.</i>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: `🟣 Claude${claudeTag}`,  callback_data: "provider:claude" },
+              { text: `🟠 Codex${codexTag}`,    callback_data: "provider:codex"  },
+            ],
+          ],
+        },
+      }
     );
     return;
   }
 
+  // Called with explicit arg (e.g. /provider codex) or from callback handler
   if (arg !== "claude" && arg !== "codex") {
     await ctx.reply("❌ Unknown provider. Use <code>claude</code> or <code>codex</code>.", { parse_mode: "HTML" });
     return;
   }
 
-  // Stop any running query first
   if (session.isRunning) {
     await session.stop();
     await Bun.sleep(200);
