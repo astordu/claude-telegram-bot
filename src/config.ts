@@ -246,3 +246,14 @@ if (ALLOWED_USERS.length === 0) {
 console.log(
   `Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}`
 );
+
+// ============== Agent Provider ==============
+
+import type { ProviderName } from "./providers/types";
+
+const rawProvider = (process.env.AGENT_PROVIDER || "claude").toLowerCase();
+export const AGENT_PROVIDER: ProviderName =
+  rawProvider === "codex" ? "codex" : "claude";
+
+console.log(`Agent provider: ${AGENT_PROVIDER}`);
+

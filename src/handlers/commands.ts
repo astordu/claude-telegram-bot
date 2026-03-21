@@ -300,3 +300,44 @@ export async function handleRetry(ctx: Context): Promise<void> {
 
   await handleText(fakeCtx);
 }
+
+/**
+ * /provider [claude|codex] - Show or switch the current AI provider.
+ */
+export async function handleProvider(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  const arg = (ctx.match as string | undefined)?.trim().toLowerCase();
+
+  if (!arg) {
+    // Show current provider
+    await ctx.reply(
+      `🤖 Current provider: <b>${session.providerName}</b>\n\n` +
+        `Use <code>/provider claude</code> or <code>/provider codex</code> to switch.\n` +
+        `<i>Switching provider will clear the current session.</i>`,
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
+  if (arg !== "claude" && arg !== "codex") {
+    await ctx.reply("❌ Unknown provider. Use <code>claude</code> or <code>codex</code>.", { parse_mode: "HTML" });
+    return;
+  }
+
+  // Stop any running query first
+  if (session.isRunning) {
+    await session.stop();
+    await Bun.sleep(200);
+    session.clearStopRequested();
+  }
+
+  session.switchProvider(arg);
+  await ctx.reply(`✅ Switched to provider: <b>${arg}</b>\n<i>Session cleared. Next message starts fresh.</i>`, { parse_mode: "HTML" });
+}
+

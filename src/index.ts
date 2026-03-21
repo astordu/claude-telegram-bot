@@ -16,6 +16,7 @@ import {
   handleResume,
   handleRestart,
   handleRetry,
+  handleProvider,
   handleText,
   handleVoice,
   handlePhoto,
@@ -58,6 +59,7 @@ bot.command("status", handleStatus);
 bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
+bot.command("provider", handleProvider);
 
 // ============== Message Handlers ==============
 

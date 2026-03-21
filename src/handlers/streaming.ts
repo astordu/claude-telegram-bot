@@ -298,33 +298,37 @@ export function createStatusCallback(
                 msg.chat.id,
                 msg.message_id,
                 formatted,
-                {
-                  parse_mode: "HTML",
-                }
+                { parse_mode: "HTML" }
               );
+              state.lastContent.set(segmentId, formatted);
             } catch (error) {
               const errorStr = String(error);
               if (errorStr.includes("MESSAGE_TOO_LONG")) {
                 // HTML overhead pushed it over - delete and chunk
-                try {
-                  await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
-                } catch (delError) {
-                  console.debug("Failed to delete for chunking:", delError);
-                }
+                try { await ctx.api.deleteMessage(msg.chat.id, msg.message_id); } catch {}
                 await sendChunkedMessages(ctx, formatted);
               } else {
-                console.debug("Failed to edit final message:", error);
+                // HTML parse error or other — fallback to plain text
+                console.debug("HTML segment_end failed, using plain text:", errorStr.slice(0, 100));
+                try {
+                  await ctx.api.editMessageText(msg.chat.id, msg.message_id, content);
+                  state.lastContent.set(segmentId, content);
+                } catch {
+                  // If even plain text edit fails, send as new message
+                  try { await ctx.reply(content); } catch {}
+                }
               }
             }
           } else {
             // Too long - delete and split
-            try {
-              await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
-            } catch (error) {
-              console.debug("Failed to delete message for splitting:", error);
-            }
+            try { await ctx.api.deleteMessage(msg.chat.id, msg.message_id); } catch {}
             await sendChunkedMessages(ctx, formatted);
           }
+        } else if (!state.textMessages.has(segmentId) && content) {
+          // No message yet (shouldn't happen with Codex placeholder, but safety net)
+          try {
+            await ctx.reply(content);
+          } catch {}
         }
       } else if (statusType === "done") {
         // Delete tool messages - text messages stay
