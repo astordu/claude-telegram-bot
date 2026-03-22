@@ -6,7 +6,7 @@
 
 import { Bot } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
-import { TELEGRAM_TOKEN, WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "./config";
+import { TELEGRAM_TOKEN, ALLOWED_USERS, RESTART_FILE } from "./config";
 import { unlinkSync, readFileSync, existsSync } from "fs";
 import {
   handleStart,
@@ -17,6 +17,7 @@ import {
   handleRestart,
   handleRetry,
   handleProvider,
+  handleBind,
   handleText,
   handleVoice,
   handlePhoto,
@@ -28,6 +29,16 @@ import {
 
 // Create bot instance
 const bot = new Bot(TELEGRAM_TOKEN);
+
+// DEBUG MIDDLEWARE: Log every incoming update immediately
+bot.use(async (ctx, next) => {
+  try {
+    const logStr = `\n[UPDATE RECEIVED] ID: ${ctx.update.update_id}\n` + 
+                   `Message: ${JSON.stringify(ctx.message || ctx.update)}\n`;
+    require("fs").appendFileSync("/tmp/debug.log", logStr);
+  } catch (e) {}
+  return next();
+});
 
 // Sequentialize non-command messages per user (prevents race conditions)
 // Commands bypass sequentialization so they work immediately
@@ -60,6 +71,7 @@ bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
 bot.command("provider", handleProvider);
+bot.command("bind", handleBind);
 
 // ============== Message Handlers ==============
 
@@ -90,6 +102,7 @@ bot.on("callback_query:data", handleCallback);
 
 bot.catch((err) => {
   console.error("Bot error:", err);
+  require("fs").appendFileSync("/tmp/debug.log", `bot.catch: ${err.message}\n`);
 });
 
 // ============== Startup ==============
@@ -97,7 +110,6 @@ bot.catch((err) => {
 console.log("=".repeat(50));
 console.log("Claude Telegram Bot - TypeScript Edition");
 console.log("=".repeat(50));
-console.log(`Working directory: ${WORKING_DIR}`);
 console.log(`Allowed users: ${ALLOWED_USERS.length}`);
 console.log("Starting bot...");
 

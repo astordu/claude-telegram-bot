@@ -4,7 +4,7 @@
 
 import type { Context } from "grammy";
 import { unlinkSync } from "fs";
-import { session } from "../session";
+import { sessionManager } from "../session";
 import { ALLOWED_USERS, TEMP_DIR, TRANSCRIPTION_AVAILABLE } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import {
@@ -24,7 +24,18 @@ export async function handleVoice(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
   const voice = ctx.message?.voice;
 
-  if (!userId || !voice || !chatId) {
+  if (!userId || !chatId) return;
+
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply(
+      "❌ <b>No workspace bound.</b>\n\nPlease use <code>/bind &lt;absolute_path&gt;</code> first.",
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
+  if (!voice) {
     return;
   }
 

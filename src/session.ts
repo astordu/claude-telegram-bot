@@ -7,13 +7,10 @@
  * Switch provider via AGENT_PROVIDER env var: "claude" (default) | "codex"
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, mkdirSync } from "fs";
+import path from "path";
 import type { Context } from "grammy";
-import {
-  AGENT_PROVIDER,
-  SESSION_FILE,
-  WORKING_DIR,
-} from "./config";
+import { AGENT_PROVIDER } from "./config";
 import { createProvider } from "./providers";
 import type { AgentProvider } from "./providers";
 import type {
@@ -22,11 +19,15 @@ import type {
   StatusCallback,
   TokenUsage,
 } from "./types";
+import { getWorkspace } from "./workspace";
 
 // Maximum number of sessions to keep in history
 const MAX_SESSIONS = 5;
 
-class AgentSession {
+export class AgentSession {
+  public chatId: number;
+  public cwd: string;
+
   sessionId: string | null = null;
   lastActivity: Date | null = null;
   queryStarted: Date | null = null;
@@ -42,6 +43,11 @@ class AgentSession {
   private _isProcessing = false;
   private _wasInterruptedByNewMessage = false;
   private stopRequested = false;
+
+  constructor(chatId: number, cwd: string) {
+    this.chatId = chatId;
+    this.cwd = cwd;
+  }
 
   get isActive(): boolean {
     return this.sessionId !== null;
@@ -152,7 +158,7 @@ class AgentSession {
       const result = await this.provider.run({
         message: messageToSend,
         sessionId: this.sessionId,
-        cwd: WORKING_DIR,
+        cwd: this.cwd,
         statusCallback: wrappedCallback,
         ctx,
         chatId,
@@ -207,8 +213,8 @@ class AgentSession {
       const newSession: SavedSession = {
         session_id: this.sessionId,
         saved_at: new Date().toISOString(),
-        working_dir: WORKING_DIR,
-        title: this.conversationTitle || "Sessione senza titolo",
+        working_dir: this.cwd,
+        title: this.conversationTitle || "Untitled Session",
       };
       const idx = history.sessions.findIndex((s) => s.session_id === this.sessionId);
       if (idx !== -1) {
@@ -217,18 +223,26 @@ class AgentSession {
         history.sessions.unshift(newSession);
       }
       history.sessions = history.sessions.slice(0, MAX_SESSIONS);
-      Bun.write(SESSION_FILE, JSON.stringify(history, null, 2));
-      console.log(`Session saved to ${SESSION_FILE}`);
+      const sessionFile = this.getSessionFile();
+      Bun.write(sessionFile, JSON.stringify(history, null, 2));
+      console.log(`Session saved to ${sessionFile}`);
     } catch (error) {
       console.warn(`Failed to save session: ${error}`);
     }
   }
 
+  private getSessionFile(): string {
+    const dir = "/tmp/telegram-sessions";
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+    return path.join(dir, `session_${this.chatId}.json`);
+  }
+
   private loadSessionHistory(): SessionHistory {
+    const sessionFile = this.getSessionFile();
     try {
-      const file = Bun.file(SESSION_FILE);
+      const file = Bun.file(sessionFile);
       if (!file.size) return { sessions: [] };
-      const text = readFileSync(SESSION_FILE, "utf-8");
+      const text = readFileSync(sessionFile, "utf-8");
       return JSON.parse(text) as SessionHistory;
     } catch {
       return { sessions: [] };
@@ -237,31 +251,57 @@ class AgentSession {
 
   getSessionList(): SavedSession[] {
     const history = this.loadSessionHistory();
-    return history.sessions.filter(
-      (s) => !s.working_dir || s.working_dir === WORKING_DIR
-    );
+    return history.sessions;
   }
 
   resumeSession(sessionId: string): [success: boolean, message: string] {
     const history = this.loadSessionHistory();
     const sessionData = history.sessions.find((s) => s.session_id === sessionId);
-    if (!sessionData) return [false, "Sessione non trovata"];
-    if (sessionData.working_dir && sessionData.working_dir !== WORKING_DIR) {
-      return [false, `Sessione per directory diversa: ${sessionData.working_dir}`];
-    }
+    if (!sessionData) return [false, "Session not found"];
     this.sessionId = sessionData.session_id;
     this.conversationTitle = sessionData.title;
     this.lastActivity = new Date();
     console.log(`Resumed session ${sessionData.session_id.slice(0, 8)}... - "${sessionData.title}"`);
-    return [true, `Ripresa sessione: "${sessionData.title}"`];
+    return [true, `Resumed session: "${sessionData.title}"`];
   }
 
   resumeLast(): [success: boolean, message: string] {
     const sessions = this.getSessionList();
-    if (sessions.length === 0) return [false, "Nessuna sessione salvata"];
+    if (sessions.length === 0) return [false, "No saved sessions"];
     return this.resumeSession(sessions[0]!.session_id);
   }
 }
 
-// Global session instance
-export const session = new AgentSession();
+/**
+ * Manages multiple AgentSessions mapped by chatId.
+ */
+class SessionManager {
+  private sessions = new Map<number, AgentSession>();
+
+  /**
+   * Gets or creates a session for the given chatId.
+   * Recreates the session if the workspace configuration has changed.
+   */
+  getOrCreate(chatId: number): AgentSession | null {
+    const cwd = getWorkspace(chatId);
+    if (!cwd) {
+      // No workspace bound. Can return null or throw. 
+      // We return null so the handler can reply with an error message to bind first.
+      return null;
+    }
+
+    let session = this.sessions.get(chatId);
+    if (!session || session.cwd !== cwd) {
+      // Re-initialize if missing or if the cwd was changed config-side
+      session = new AgentSession(chatId, cwd);
+      this.sessions.set(chatId, session);
+    }
+    return session;
+  }
+  
+  get(chatId: number): AgentSession | undefined {
+    return this.sessions.get(chatId);
+  }
+}
+
+export const sessionManager = new SessionManager();

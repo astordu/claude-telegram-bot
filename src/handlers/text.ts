@@ -3,7 +3,7 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
+import { sessionManager } from "../session";
 import { ALLOWED_USERS } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import {
@@ -23,25 +23,30 @@ export async function handleText(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
   let message = ctx.message?.text;
 
+  require("fs").appendFileSync("/tmp/debug.log", `handleText entered: message=${message}, user=${userId}, chat=${chatId}\n`);
+
   if (!userId || !message || !chatId) {
     return;
   }
 
   // 1. Authorization check
   if (!isAuthorized(userId, ALLOWED_USERS)) {
+    require("fs").appendFileSync("/tmp/debug.log", `blocked by isAuthorized\n`);
     await ctx.reply("Unauthorized. Contact the bot owner for access.");
     return;
   }
 
   // 2. Check for interrupt prefix
-  message = await checkInterrupt(message);
+  message = await checkInterrupt(message, chatId);
   if (!message.trim()) {
+    require("fs").appendFileSync("/tmp/debug.log", `blocked by checkInterrupt\n`);
     return;
   }
 
   // 3. Rate limit check
   const [allowed, retryAfter] = rateLimiter.check(userId);
   if (!allowed) {
+    require("fs").appendFileSync("/tmp/debug.log", `blocked by rateLimiter\n`);
     await auditLogRateLimit(userId, username, retryAfter!);
     await ctx.reply(
       `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
@@ -49,7 +54,23 @@ export async function handleText(ctx: Context): Promise<void> {
     return;
   }
 
-  // 4. Store message for retry
+  // 4. Get active session for this chat
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    require("fs").appendFileSync("/tmp/debug.log", `no session, sending reply\n`);
+    try {
+      await ctx.reply(
+        "❌ <b>No workspace bound.</b>\n\nPlease use <code>/bind &lt;absolute_path&gt;</code> to bind a working directory for this chat first.",
+        { parse_mode: "HTML" }
+      );
+      require("fs").appendFileSync("/tmp/debug.log", `no session reply sent ok\n`);
+    } catch (e: any) {
+      require("fs").appendFileSync("/tmp/debug.log", `no session reply FAILED: ${e.message}\n`);
+    }
+    return;
+  }
+
+  // 5. Store message for retry
   session.lastMessage = message;
 
   // 5. Set conversation title from first message (if new session)

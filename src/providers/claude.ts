@@ -118,7 +118,8 @@ export class ClaudeProvider implements AgentProvider {
     const mcpConfigJson = buildMcpConfigArg();
     if (mcpConfigJson) args.push("--mcp-config", mcpConfigJson);
 
-    for (const dir of ALLOWED_PATHS) args.push("--add-dir", dir);
+    // Give Claude permission to work in the chat's workspace
+    args.push("--add-dir", cwd);
 
     if (sessionId) {
       args.push("--resume", sessionId);
@@ -208,7 +209,7 @@ export class ClaudeProvider implements AgentProvider {
                 // Safety: Bash
                 if (b.name === "Bash") {
                   const cmd = String(b.input.command || "");
-                  const [safe, reason] = checkCommandSafety(cmd);
+                  const [safe, reason] = checkCommandSafety(cmd, cwd);
                   if (!safe) {
                     await statusCallback("tool", `BLOCKED: ${reason}`);
                     child.kill("SIGTERM");
@@ -221,7 +222,7 @@ export class ClaudeProvider implements AgentProvider {
                   const filePath = String(b.input.file_path || "");
                   if (filePath) {
                     const isTmpRead = b.name === "Read" && (TEMP_PATHS.some((p) => filePath.startsWith(p)) || filePath.includes("/.claude/"));
-                    if (!isTmpRead && !isPathAllowed(filePath)) {
+                    if (!isTmpRead && !isPathAllowed(filePath, cwd)) {
                       await statusCallback("tool", `Access denied: ${filePath}`);
                       child.kill("SIGTERM");
                       throw new Error(`File access blocked: ${filePath}`);

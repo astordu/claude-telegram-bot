@@ -6,7 +6,7 @@
 
 import type { Context } from "grammy";
 import { unlinkSync } from "fs";
-import { session } from "../session";
+import { sessionManager } from "../session";
 import { ALLOWED_USERS } from "../config";
 import { isAuthorized } from "../security";
 import { auditLog, startTypingIndicator } from "../utils";
@@ -107,6 +107,12 @@ export async function handleCallback(ctx: Context): Promise<void> {
   // 8. Send the choice to Claude as a message
   const message = selectedOption;
 
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.answerCallbackQuery({ text: "Workspace non configurato." });
+    return;
+  }
+
   // Interrupt any running query - button responses are always immediate
   if (session.isRunning) {
     console.log("Interrupting current query for button response");
@@ -169,9 +175,15 @@ async function handleResumeCallback(
   const username = ctx.from?.username || "unknown";
   const chatId = ctx.chat?.id;
   const sessionId = callbackData.replace("resume:", "");
-
   if (!sessionId || !userId || !chatId) {
     await ctx.answerCallbackQuery({ text: "ID sessione non valido" });
+    return;
+  }
+
+  // Check if workspace bound
+  const session = sessionManager.getOrCreate(chatId!);
+  if (!session) {
+    await ctx.answerCallbackQuery({ text: "Nessun workspace collegato." });
     return;
   }
 
@@ -230,6 +242,15 @@ async function handleProviderCallback(
   ctx: Context,
   callbackData: string
 ): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
+
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.answerCallbackQuery({ text: "Workspace not bound" });
+    return;
+  }
+
   const providerName = callbackData.replace("provider:", "") as "claude" | "codex";
 
   if (providerName !== "claude" && providerName !== "codex") {

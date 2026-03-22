@@ -42,7 +42,6 @@ export const ALLOWED_USERS: number[] = (
   .map((x) => parseInt(x.trim(), 10))
   .filter((x) => !isNaN(x));
 
-export const WORKING_DIR = process.env.CLAUDE_WORKING_DIR || HOME;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
 // ============== Claude CLI Path ==============
@@ -87,7 +86,6 @@ export { MCP_SERVERS };
 
 // Allowed directories for file operations
 const defaultAllowedPaths = [
-  WORKING_DIR,
   `${HOME}/Documents`,
   `${HOME}/Downloads`,
   `${HOME}/Desktop`,
@@ -244,7 +242,7 @@ if (ALLOWED_USERS.length === 0) {
 }
 
 console.log(
-  `Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}`
+  `Config loaded: ${ALLOWED_USERS.length} allowed users.`
 );
 
 // ============== Agent Provider ==============

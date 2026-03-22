@@ -5,7 +5,7 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
+import { sessionManager } from "../session";
 import { ALLOWED_USERS, TEMP_DIR } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import { auditLog, auditLogRateLimit, startTypingIndicator } from "../utils";
@@ -56,6 +56,9 @@ async function processPhotos(
   username: string,
   chatId: number
 ): Promise<void> {
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) return;
+
   // Mark processing started
   const stopProcessing = session.startProcessing();
 
@@ -115,7 +118,14 @@ export async function handlePhoto(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
   const mediaGroupId = ctx.message?.media_group_id;
 
-  if (!userId || !chatId) {
+  if (!userId || !chatId) return;
+
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply(
+      "❌ <b>No workspace bound.</b>\n\nPlease use <code>/bind &lt;absolute_path&gt;</code> first.",
+      { parse_mode: "HTML" }
+    );
     return;
   }
 

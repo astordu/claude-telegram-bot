@@ -5,9 +5,50 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
-import { WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "../config";
+import { sessionManager } from "../session";
+import { ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
+import { bindWorkspace, getWorkspace } from "../workspace";
+import { resolve } from "path";
+
+/**
+ * /bind - Bind current group to a given local workspace path.
+ */
+export async function handleBind(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    return;
+  }
+
+  const arg = (ctx.match as string | undefined)?.trim();
+  if (!arg || !chatId) {
+    await ctx.reply(`❌ <b>Usage:</b> <code>/bind &lt;absolute_path&gt;</code>\n\nCurrent bound path: <code>${chatId ? getWorkspace(chatId) || "None" : "None"}</code>`, { parse_mode: "HTML" });
+    return;
+  }
+
+  // resolve to absolute path
+  const absolutePath = resolve(arg);
+  
+  // To keep it simple, we just bind it. We don't check if dir exists, 
+  // users can create it later. But we could.
+  bindWorkspace(chatId, absolutePath);
+
+  // Clear any existing session in memory for this chat to force recreation
+  // This is handled by getOrCreate() since cwd changed, but let's be safe.
+  const existingSession = sessionManager.get(chatId);
+  if (existingSession) {
+    if (existingSession.isRunning) {
+      await existingSession.stop();
+      await Bun.sleep(200);
+      existingSession.clearStopRequested();
+    }
+  }
+
+  await ctx.reply(`✅ <b>Workspace Bound!</b>\n\nThis chat is now operating under:\n<code>${absolutePath}</code>`, { parse_mode: "HTML" });
+}
 
 /**
  * /start - Show welcome message and status.
@@ -21,8 +62,10 @@ export async function handleStart(ctx: Context): Promise<void> {
     return;
   }
 
-  const status = session.isActive ? "Active session" : "No active session";
-  const workDir = WORKING_DIR;
+  const chatId = ctx.chat?.id;
+  const session = chatId ? sessionManager.get(chatId) : null;
+  const status = session && session.isActive ? "Active session" : "No active session";
+  const workDir = (chatId ? getWorkspace(chatId!) : null) || "Not bound";
 
   await ctx.reply(
     `🤖 <b>Claude Telegram Bot</b>\n\n` +
@@ -49,9 +92,17 @@ export async function handleStart(ctx: Context): Promise<void> {
  */
 export async function handleNew(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  if (!chatId) return;
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply("❌ Workspace not bound. Use <code>/bind &lt;path&gt;</code> first.", { parse_mode: "HTML" });
     return;
   }
 
@@ -75,11 +126,16 @@ export async function handleNew(ctx: Context): Promise<void> {
  */
 export async function handleStop(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
     return;
   }
+
+  if (!chatId) return;
+  const session = sessionManager.get(chatId);
+  if (!session) return;
 
   if (session.isRunning) {
     const result = await session.stop();
@@ -98,9 +154,17 @@ export async function handleStop(ctx: Context): Promise<void> {
  */
 export async function handleStatus(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  if (!chatId) return;
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply("❌ Workspace not bound. Use <code>/bind &lt;path&gt;</code> first.", { parse_mode: "HTML" });
     return;
   }
 
@@ -165,7 +229,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
   }
 
   // Working directory
-  lines.push(`\n📁 Working dir: <code>${WORKING_DIR}</code>`);
+  lines.push(`\n📁 Working dir: <code>${session.cwd}</code>`);
   lines.push(`\n💡 <i>Switch provider: /provider claude · /provider codex</i>`);
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
@@ -176,9 +240,17 @@ export async function handleStatus(ctx: Context): Promise<void> {
  */
 export async function handleResume(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  if (!chatId) return;
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply("❌ Workspace not bound. Use <code>/bind &lt;path&gt;</code> first.", { parse_mode: "HTML" });
     return;
   }
 
@@ -227,7 +299,6 @@ export async function handleResume(ctx: Context): Promise<void> {
   );
 }
 
-
 /**
  * /restart - Restart the bot process.
  */
@@ -270,9 +341,17 @@ export async function handleRestart(ctx: Context): Promise<void> {
  */
 export async function handleRetry(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  if (!chatId) return;
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply("❌ Workspace not bound. Use <code>/bind &lt;path&gt;</code> first.", { parse_mode: "HTML" });
     return;
   }
 
@@ -312,9 +391,17 @@ export async function handleRetry(ctx: Context): Promise<void> {
  */
 export async function handleProvider(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  if (!chatId) return;
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply("❌ Workspace not bound. Use <code>/bind &lt;path&gt;</code> first.", { parse_mode: "HTML" });
     return;
   }
 
@@ -358,4 +445,3 @@ export async function handleProvider(ctx: Context): Promise<void> {
   session.switchProvider(arg);
   await ctx.reply(`✅ Switched to provider: <b>${arg}</b>\n<i>Session cleared. Next message starts fresh.</i>`, { parse_mode: "HTML" });
 }
-

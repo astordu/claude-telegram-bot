@@ -77,7 +77,7 @@ export const rateLimiter = new RateLimiter();
 
 // ============== Path Validation ==============
 
-export function isPathAllowed(path: string): boolean {
+export function isPathAllowed(path: string, allowedDir?: string): boolean {
   try {
     // Expand ~ and resolve to absolute path
     const expanded = path.replace(/^~/, process.env.HOME || "");
@@ -98,14 +98,24 @@ export function isPathAllowed(path: string): boolean {
       }
     }
 
-    // Check against allowed paths using proper containment
-    for (const allowed of ALLOWED_PATHS) {
-      const allowedResolved = resolve(allowed);
+    if (allowedDir) {
+      const allowedResolved = resolve(allowedDir);
       if (
         resolved === allowedResolved ||
         resolved.startsWith(allowedResolved + "/")
       ) {
         return true;
+      }
+    } else {
+      // Check against allowed paths using proper containment
+      for (const allowed of ALLOWED_PATHS) {
+        const allowedResolved = resolve(allowed);
+        if (
+          resolved === allowedResolved ||
+          resolved.startsWith(allowedResolved + "/")
+        ) {
+          return true;
+        }
       }
     }
 
@@ -118,7 +128,8 @@ export function isPathAllowed(path: string): boolean {
 // ============== Command Safety ==============
 
 export function checkCommandSafety(
-  command: string
+  command: string,
+  allowedDir?: string
 ): [safe: boolean, reason: string] {
   const lowerCommand = command.toLowerCase();
 
@@ -141,7 +152,7 @@ export function checkCommandSafety(
           if (arg.startsWith("-") || arg.length <= 1) continue;
 
           // Check if path is allowed
-          if (!isPathAllowed(arg)) {
+          if (!isPathAllowed(arg, allowedDir)) {
             return [false, `rm target outside allowed paths: ${arg}`];
           }
         }

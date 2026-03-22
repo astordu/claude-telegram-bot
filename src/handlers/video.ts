@@ -5,7 +5,7 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
+import { sessionManager } from "../session";
 import { ALLOWED_USERS, TEMP_DIR } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import { auditLog, auditLogRateLimit, startTypingIndicator } from "../utils";
@@ -48,10 +48,21 @@ export async function handleVideo(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
   const username = ctx.from?.username || "unknown";
   const chatId = ctx.chat?.id;
+  if (!userId || !chatId) return;
+
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply(
+      "❌ <b>No workspace bound.</b>\n\nPlease use <code>/bind &lt;absolute_path&gt;</code> first.",
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
   const video = ctx.message?.video || ctx.message?.video_note;
   const caption = ctx.message?.caption;
 
-  if (!userId || !chatId || !video) {
+  if (!video) {
     return;
   }
 
@@ -97,8 +108,13 @@ export async function handleVideo(ctx: Context): Promise<void> {
     return;
   }
 
+  // The session might have been cleared or become invalid between the initial check and now.
+  // Re-check or re-get the session to ensure it's still valid before proceeding with processing.
+  const currentSession = sessionManager.getOrCreate(chatId);
+  if (!currentSession) return;
+
   // 5. Process video
-  const stopProcessing = session.startProcessing();
+  const stopProcessing = currentSession.startProcessing();
   const typing = startTypingIndicator(ctx);
 
   try {

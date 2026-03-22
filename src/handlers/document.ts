@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
+import { sessionManager } from "../session";
 import { ALLOWED_USERS, TEMP_DIR } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import { auditLog, auditLogRateLimit, startTypingIndicator } from "../utils";
@@ -217,6 +217,9 @@ async function processArchive(
   username: string,
   chatId: number
 ): Promise<void> {
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) return;
+
   const stopProcessing = session.startProcessing();
   const typing = startTypingIndicator(ctx);
 
@@ -317,6 +320,9 @@ async function processDocuments(
   username: string,
   chatId: number
 ): Promise<void> {
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) return;
+
   // Mark processing started
   const stopProcessing = session.startProcessing();
 
@@ -416,10 +422,21 @@ export async function handleDocument(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
   const username = ctx.from?.username || "unknown";
   const chatId = ctx.chat?.id;
+  if (!userId || !chatId) return;
+
+  const session = sessionManager.getOrCreate(chatId);
+  if (!session) {
+    await ctx.reply(
+      "❌ <b>No workspace bound.</b>\n\nPlease use <code>/bind &lt;absolute_path&gt;</code> first.",
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
   const doc = ctx.message?.document;
   const mediaGroupId = ctx.message?.media_group_id;
 
-  if (!userId || !chatId || !doc) {
+  if (!doc) {
     return;
   }
 
