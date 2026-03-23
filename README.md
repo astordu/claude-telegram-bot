@@ -13,6 +13,8 @@
 
 ## 关于作者
 
+雷哥
+各个媒体号: 雷哥AI
 - 🌐 网站：[leigeai.com](https://leigeai.com/)
 - 💬 微信：`leigeaicom`
 - 🏘️ 社群：[知识星球 · 探索使用AI通向自由之路](https://wx.zsxq.com/group/28882285418421)
