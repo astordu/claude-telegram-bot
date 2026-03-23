@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import * as readline from "readline";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const ENV_FILE = resolve(ROOT, ".env");
@@ -43,22 +44,19 @@ function setEnvValue(content: string, key: string, value: string): string {
   return content.trimEnd() + `\n${line}\n`;
 }
 
-/** Prompt user for input (reads from stdin). */
-async function prompt(question: string, hidden = false): Promise<string> {
-  process.stdout.write(question);
-  if (hidden) process.stdout.write("\x1b[8m"); // hide chars
-  const chunks: Buffer[] = [];
-  for await (const chunk of Bun.stdin.stream()) {
-    const text = Buffer.from(chunk).toString("utf-8");
-    if (text.includes("\n")) {
-      const line = text.split("\n")[0] ?? "";
-      chunks.push(Buffer.from(line));
-      break;
-    }
-    chunks.push(Buffer.from(chunk));
-  }
-  if (hidden) process.stdout.write("\x1b[28m\n"); // show chars + newline
-  return Buffer.concat(chunks).toString("utf-8").trim();
+/** Prompt user for input using readline (reliable for sequential prompts). */
+function prompt(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 /** Validate Telegram bot token format. */
