@@ -47,6 +47,21 @@ export class AgentSession {
   constructor(chatId: number, cwd: string) {
     this.chatId = chatId;
     this.cwd = cwd;
+    // Auto-restore last session from disk so bot restarts don't cause amnesia
+    this._restoreLastSession();
+  }
+
+  private _restoreLastSession(): void {
+    try {
+      const sessions = this.getSessionList();
+      if (sessions.length > 0 && sessions[0]) {
+        this.sessionId = sessions[0].session_id;
+        this.conversationTitle = sessions[0].title;
+        console.log(`[session] Auto-restored session ${this.sessionId.slice(0, 8)}... for chat ${this.chatId}`);
+      }
+    } catch {
+      // Ignore restore errors - start fresh
+    }
   }
 
   get isActive(): boolean {
@@ -59,6 +74,10 @@ export class AgentSession {
 
   get providerName(): string {
     return this.provider.name;
+  }
+
+  get modelName(): string {
+    return this.provider.modelName ?? this.provider.name;
   }
 
   consumeInterruptFlag(): boolean {

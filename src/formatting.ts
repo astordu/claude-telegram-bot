@@ -11,8 +11,7 @@ export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/>/g, "&gt;");
 }
 
 /**
@@ -22,65 +21,87 @@ export function escapeHtml(text: string): string {
  * Telegram HTML supports: <b>, <i>, <code>, <pre>, <a href="">
  */
 export function convertMarkdownToHtml(text: string): string {
-  // Store code blocks temporarily to avoid processing their contents
-  const codeBlocks: string[] = [];
-  const inlineCodes: string[] = [];
+  // All pre-rendered HTML blocks are stored here and swapped back after escaping
+  const htmlBlocks: string[] = [];
+  const saveHtmlBlock = (html: string): string => {
+    htmlBlocks.push(html);
+    return `\x00HTMLBLOCK${htmlBlocks.length - 1}\x00`;
+  };
 
-  // Save code blocks first (```code```)
+  // 1. Save fenced code blocks (```...```)
   text = text.replace(/```(?:\w+)?\n?([\s\S]*?)```/g, (_, code) => {
-    codeBlocks.push(code);
-    return `\x00CODEBLOCK${codeBlocks.length - 1}\x00`;
+    return saveHtmlBlock(`<pre>${escapeHtml(code)}</pre>`);
   });
 
-  // Save inline code (`code`)
+  // 2. Save inline code (`...`)
   text = text.replace(/`([^`]+)`/g, (_, code) => {
-    inlineCodes.push(code);
-    return `\x00INLINECODE${inlineCodes.length - 1}\x00`;
+    return saveHtmlBlock(`<code>${escapeHtml(code)}</code>`);
   });
 
-  // Escape HTML entities in the remaining text
+  // 3. Save blockquotes (match raw '>' before HTML escaping)
+  text = text.replace(/(?:^> ?.*\n?)+/gm, (block) => {
+    const inner = block
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => (l.startsWith("> ") ? l.slice(2) : l.startsWith(">") ? l.slice(1) : l))
+      .join("\n");
+    return saveHtmlBlock(`<blockquote>${escapeHtml(inner)}</blockquote>`);
+  });
+
+  // 4. Save markdown tables (lines starting with '|')
+  // Use \n? on last line so the final row is captured even without trailing newline
+  text = text.replace(/(?:^\|.+\n)*^\|.+/gm, (tableBlock) => {
+    const rows = tableBlock
+      .trim()
+      .split("\n")
+      .filter((row) => !/^\|[-| :]+\|$/.test(row.trim()));
+    const formatted = rows
+      .map((row) =>
+        row
+          .split("|")
+          .filter((_, i, arr) => i > 0 && i < arr.length - 1)
+          .map((cell) => cell.trim())
+          .join("  │  ")
+      )
+      .join("\n");
+    return saveHtmlBlock(`<pre>${escapeHtml(formatted)}</pre>`);
+  });
+
+  // 5. Escape remaining HTML entities (safe now - HTML blocks are in placeholders)
   text = escapeHtml(text);
 
-  // Headers: ## Header -> <b>Header</b>
-  text = text.replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>\n");
+  // 6. Markdown conversions
+  // H1 (# Title) -> bold with decorative separator
+  text = text.replace(/^# (.+)$/gm, "\n🔷 <b>$1</b>\n");
+  // H2 (## Title) -> bold with line above
+  text = text.replace(/^## (.+)$/gm, "\n<b>── $1 ──</b>\n");
+  // H3+ (### Title) -> bold with ▸ prefix
+  text = text.replace(/^#{3,6} (.+)$/gm, "\n<b>▸ $1</b>\n");
 
-  // Bold: **text** -> <b>text</b>
+  // Bold: **text** -> <b>text</b>  (no s-flag: must not span newlines)
   text = text.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 
-  // Also handle *text* as bold (single asterisk)
-  text = text.replace(/(?<!\*)\*(.+?)\*(?!\*)/g, "<b>$1</b>");
-
-  // Double underscore: __text__ -> <b>text</b>
+  // Double underscore __text__ -> <b>text</b>
   text = text.replace(/__([^_]+)__/g, "<b>$1</b>");
 
-  // Italic: _text_ -> <i>text</i> (but not __text__)
-  text = text.replace(/(?<!_)_([^_]+)_(?!_)/g, "<i>$1</i>");
-
-  // Blockquotes: &gt; text -> <blockquote>text</blockquote>
-  text = convertBlockquotes(text);
+  // Italic: _text_ -> <i>text</i>
+  text = text.replace(/(?<!_)_([^_\n]+)_(?!_)/g, "<i>$1</i>");
 
   // Bullet lists: - item or * item -> • item
   text = text.replace(/^[-*] /gm, "• ");
 
-  // Horizontal rules: --- or *** -> blank line
-  text = text.replace(/^[-*]{3,}$/gm, "");
+  // Numbered list: clean up stray backslash escapes ("1\. item" -> "1. item")
+  text = text.replace(/^(\d+)\\\. /gm, "$1. ");
+
+  // Horizontal rules --- -> visual separator
+  text = text.replace(/^[-*]{3,}$/gm, "──────────");
 
   // Links: [text](url) -> <a href="url">text</a>
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
-  // Restore code blocks
-  for (let i = 0; i < codeBlocks.length; i++) {
-    const escapedCode = escapeHtml(codeBlocks[i]!);
-    text = text.replace(`\x00CODEBLOCK${i}\x00`, `<pre>${escapedCode}</pre>`);
-  }
-
-  // Restore inline code
-  for (let i = 0; i < inlineCodes.length; i++) {
-    const escapedCode = escapeHtml(inlineCodes[i]!);
-    text = text.replace(
-      `\x00INLINECODE${i}\x00`,
-      `<code>${escapedCode}</code>`
-    );
+  // 7. Restore all HTML blocks
+  for (let i = 0; i < htmlBlocks.length; i++) {
+    text = text.replace(`\x00HTMLBLOCK${i}\x00`, htmlBlocks[i]!);
   }
 
   // Collapse multiple newlines
@@ -89,8 +110,9 @@ export function convertMarkdownToHtml(text: string): string {
   return text;
 }
 
+
 /**
- * Convert blockquotes (handles multi-line).
+ * Convert blockquotes (handles multi-line). Must be called BEFORE escapeHtml.
  */
 function convertBlockquotes(text: string): string {
   const lines = text.split("\n");
@@ -99,14 +121,10 @@ function convertBlockquotes(text: string): string {
   const blockquoteLines: string[] = [];
 
   for (const line of lines) {
-    if (line.startsWith("&gt; ") || line === "&gt;") {
-      if (line === "&gt;") {
-        blockquoteLines.push("");
-      } else {
-        // Remove '&gt; ' and strip # from hashtags (Telegram mobile bug workaround)
-        const content = line.slice(5).replace(/#/g, "");
-        blockquoteLines.push(content);
-      }
+    // Match '> ' at line start (raw, before HTML escaping)
+    if (line.startsWith("> ") || line === ">") {
+      const content = line === ">" ? "" : line.slice(2).replace(/#/g, "");
+      blockquoteLines.push(content);
       inBlockquote = true;
     } else {
       if (inBlockquote) {
@@ -126,6 +144,33 @@ function convertBlockquotes(text: string): string {
   }
 
   return result.join("\n");
+}
+
+/**
+ * Convert markdown tables to <pre> blocks (Telegram does not support HTML tables).
+ * Must be called BEFORE escapeHtml.
+ */
+function convertTables(text: string): string {
+  // Match a block of lines that all start with '|'
+  return text.replace(/(?:^\|.+\n)+/gm, (tableBlock) => {
+    // Strip alignment rows (| --- | --- |)
+    const rows = tableBlock
+      .trim()
+      .split("\n")
+      .filter((row) => !/^\|[-| :]+\|$/.test(row.trim()));
+
+    const formatted = rows
+      .map((row) =>
+        row
+          .split("|")
+          .filter((_, i, arr) => i > 0 && i < arr.length - 1) // drop empty first/last
+          .map((cell) => cell.trim())
+          .join("  |  ")
+      )
+      .join("\n");
+
+    return `<pre>${formatted}</pre>\n`;
+  });
 }
 
 // Legacy alias

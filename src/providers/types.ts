@@ -43,6 +43,9 @@ export interface ProviderRunResult {
 export interface AgentProvider {
   readonly name: ProviderName;
 
+  /** Human-readable model name (e.g. "claude-sonnet-4-5") */
+  readonly modelName?: string;
+
   /**
    * Run a single prompt and stream updates via statusCallback.
    * Must handle cancellation via the AbortController set by setAbortController.

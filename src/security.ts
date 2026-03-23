@@ -83,12 +83,16 @@ export function isPathAllowed(path: string, allowedDir?: string): boolean {
     const expanded = path.replace(/^~/, process.env.HOME || "");
     const normalized = normalize(expanded);
 
+    // If path is relative and we have an allowedDir, resolve relative to allowedDir
+    // (not process.cwd() which is the bot's own directory)
+    const base = !expanded.startsWith("/") && allowedDir ? allowedDir : undefined;
+
     // Try to resolve symlinks (may fail if path doesn't exist yet)
     let resolved: string;
     try {
-      resolved = realpathSync(normalized);
+      resolved = realpathSync(base ? resolve(base, normalized) : normalized);
     } catch {
-      resolved = resolve(normalized);
+      resolved = base ? resolve(base, normalized) : resolve(normalized);
     }
 
     // Always allow temp paths (for bot's own files)

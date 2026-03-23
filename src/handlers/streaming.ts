@@ -307,15 +307,18 @@ export function createStatusCallback(
                 // HTML overhead pushed it over - delete and chunk
                 try { await ctx.api.deleteMessage(msg.chat.id, msg.message_id); } catch {}
                 await sendChunkedMessages(ctx, formatted);
+              } else if (errorStr.includes("message is not modified")) {
+                // Content unchanged - ignore
               } else {
-                // HTML parse error or other — fallback to plain text
-                console.debug("HTML segment_end failed, using plain text:", errorStr.slice(0, 100));
+                // HTML parse error — delete original and re-send as formatted reply
+                console.debug("HTML segment_end failed, re-sending formatted:", errorStr.slice(0, 100));
+                try { await ctx.api.deleteMessage(msg.chat.id, msg.message_id); } catch {}
                 try {
-                  await ctx.api.editMessageText(msg.chat.id, msg.message_id, content);
-                  state.lastContent.set(segmentId, content);
+                  await ctx.reply(formatted, { parse_mode: "HTML" });
                 } catch {
-                  // If even plain text edit fails, send as new message
-                  try { await ctx.reply(content); } catch {}
+                  // Last resort: send without parse_mode (strips HTML tags)
+                  const stripped = formatted.replace(/<[^>]+>/g, "");
+                  try { await ctx.reply(stripped); } catch {}
                 }
               }
             }
@@ -325,10 +328,13 @@ export function createStatusCallback(
             await sendChunkedMessages(ctx, formatted);
           }
         } else if (!state.textMessages.has(segmentId) && content) {
-          // No message yet (shouldn't happen with Codex placeholder, but safety net)
+          // No message yet — send formatted
+          const formatted2 = convertMarkdownToHtml(content);
           try {
-            await ctx.reply(content);
-          } catch {}
+            await ctx.reply(formatted2, { parse_mode: "HTML" });
+          } catch {
+            try { await ctx.reply(content.replace(/<[^>]+>/g, "")); } catch {}
+          }
         }
       } else if (statusType === "done") {
         // Delete tool messages - text messages stay

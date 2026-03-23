@@ -80,6 +80,7 @@ function buildMcpConfigArg(): string | null {
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude" as const;
+  readonly modelName = "claude-sonnet-4-5";
 
   private _child: ReturnType<typeof spawn> | null = null;
   private _running = false;
@@ -157,6 +158,17 @@ export class ClaudeProvider implements AgentProvider {
         let lineBuffer = "";
         let stderrBuffer = "";
 
+        // Chain events sequentially to prevent race conditions.
+        // Without this, two concurrent "text" events can both see
+        // !textMessages.has(segmentId) and each create a new message.
+        let eventChain = Promise.resolve();
+
+        const enqueueEvent = (event: CliEvent) => {
+          eventChain = eventChain
+            .then(() => processEvent(event))
+            .catch((err) => reject(err));
+        };
+
         child.stdout!.on("data", (chunk: Buffer) => {
           lineBuffer += chunk.toString();
           const lines = lineBuffer.split("\n");
@@ -168,7 +180,7 @@ export class ClaudeProvider implements AgentProvider {
             let event: CliEvent;
             try { event = JSON.parse(trimmed) as CliEvent; }
             catch { continue; }
-            processEvent(event).catch(reject);
+            enqueueEvent(event);
           }
         });
 
@@ -177,13 +189,16 @@ export class ClaudeProvider implements AgentProvider {
 
         child.on("close", (code) => {
           const rem = lineBuffer.trim();
-          if (rem) { try { processEvent(JSON.parse(rem) as CliEvent).catch(() => {}); } catch {} }
-          if (stderrBuffer.trim()) console.warn(`[claude] stderr: ${stderrBuffer.trim().slice(0, 300)}`);
-          if (code !== 0 && !queryCompleted && !askUserTriggered) {
-            reject(new Error(`claude exited with code ${code}: ${stderrBuffer.slice(0, 200)}`));
-          } else {
-            resolve();
-          }
+          if (rem) { try { enqueueEvent(JSON.parse(rem) as CliEvent); } catch {} }
+          // Wait for any queued events to finish before resolving/rejecting
+          eventChain.finally(() => {
+            if (stderrBuffer.trim()) console.warn(`[claude] stderr: ${stderrBuffer.trim().slice(0, 300)}`);
+            if (code !== 0 && !queryCompleted && !askUserTriggered) {
+              reject(new Error(`claude exited with code ${code}: ${stderrBuffer.slice(0, 200)}`));
+            } else {
+              resolve();
+            }
+          });
         });
 
         const processEvent = async (event: CliEvent): Promise<void> => {

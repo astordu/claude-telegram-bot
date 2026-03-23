@@ -23,11 +23,14 @@ export async function handleBind(ctx: Context): Promise<void> {
     return;
   }
 
-  const arg = (ctx.match as string | undefined)?.trim();
-  if (!arg || !chatId) {
+  const rawArg = (ctx.match as string | undefined)?.trim();
+  if (!rawArg || !chatId) {
     await ctx.reply(`❌ <b>Usage:</b> <code>/bind &lt;absolute_path&gt;</code>\n\nCurrent bound path: <code>${chatId ? getWorkspace(chatId) || "None" : "None"}</code>`, { parse_mode: "HTML" });
     return;
   }
+
+  // Strip surrounding quotes that Telegram may add (e.g. '/path' or "/path")
+  const arg = rawArg.replace(/^['"]|['"]$/g, "");
 
   // resolve to absolute path
   const absolutePath = resolve(arg);
@@ -118,7 +121,7 @@ export async function handleNew(ctx: Context): Promise<void> {
   // Clear session
   await session.kill();
 
-  await ctx.reply("🆕 Session cleared. Next message starts fresh.");
+  await ctx.reply(`🆕 Session cleared. Next message starts fresh.\n\n🤖 Provider: <b>${session.providerName}</b>\n🧠 Model: <code>${session.modelName}</code>\n📁 Workspace: <code>${session.cwd}</code>`, { parse_mode: "HTML" });
 }
 
 /**
