@@ -9,6 +9,7 @@ import { spawn } from "child_process";
 import {
   ALLOWED_PATHS,
   CLAUDE_CLI_PATH,
+  CLAUDE_MODEL,
   MCP_SERVERS,
   SAFETY_PROMPT,
   STREAMING_THROTTLE_MS,
@@ -80,7 +81,7 @@ function buildMcpConfigArg(): string | null {
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude" as const;
-  readonly modelName = "claude-sonnet-4-5";
+  readonly modelName = CLAUDE_MODEL || "(default)";
 
   private _child: ReturnType<typeof spawn> | null = null;
   private _running = false;
@@ -105,12 +106,16 @@ export class ClaudeProvider implements AgentProvider {
       "--print",
       "--output-format", "stream-json",
       "--verbose",
-      "--model", "claude-sonnet-4-5",
       "--permission-mode", "bypassPermissions",
       "--dangerously-skip-permissions",
       "--setting-sources", "user,project",
       "--system-prompt", SAFETY_PROMPT,
     ];
+
+    // Only pass --model if explicitly configured; otherwise Claude uses the user's default
+    if (CLAUDE_MODEL) {
+      args.push("--model", CLAUDE_MODEL);
+    }
 
     if (thinkingTokens > 0) {
       args.push("--append-system-prompt", `[Thinking budget: ${thinkingTokens} tokens]`);

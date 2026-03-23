@@ -255,3 +255,10 @@ export const AGENT_PROVIDER: ProviderName =
 
 console.log(`Agent provider: ${AGENT_PROVIDER}`);
 
+// ============== Claude Model ==============
+
+// Optional: override the Claude model. Leave unset to use the user's default
+// model as configured in ~/.claude/settings.json (or claude's own default).
+// Example: CLAUDE_MODEL=claude-opus-4-5
+export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "";
+
