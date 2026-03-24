@@ -1,4 +1,4 @@
-# Claude Telegram Bot（扩展版）
+# 口袋里的codex、claude
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-1.0+-black.svg)](https://bun.sh/)
@@ -6,6 +6,8 @@
 **通过 Telegram，随时随地调用 Claude Code 和 Codex CLI，打造你的口袋 AI 助手。**
 
 ![Demo](assets/yanshi.gif)
+
+** 看不清, 可以看视频教程: ** https://www.bilibili.com/video/BV1LLQqBbEqV/?vd_source=9e67f3c6b2536721700cabd17dcc4170
 
 ---
 
