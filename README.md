@@ -7,7 +7,7 @@
 
 支持文字、语音、图片、文件、音频、视频消息。实时查看 AI 的响应过程和工具调用。
 
-![Demo](assets/demo.gif)
+![Demo](assets/yanshi.gif)
 
 ---
 
